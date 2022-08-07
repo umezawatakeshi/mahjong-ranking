@@ -51,6 +51,15 @@ type MatchInfo struct {
 
 var Matches = []*MatchInfo{}
 
+func (match *MatchInfo) GetPlace(player *PlayerInfo) int {
+	for i := range match.Players {
+		if match.Players[i] == player {
+			return i
+		}
+	}
+	panic(nil)
+}
+
 var tagFlag *string
 
 func main() {
@@ -102,12 +111,9 @@ func main() {
 			recentFirstIndex := len(player.Matches) - LeastNumMatches
 
 			for _, match := range player.Matches[recentFirstIndex:] {
-				for i := range match.Players {
-					if match.Players[i] == player {
-						player.RecentTotalScore += match.Scores[i]
-						player.RecentPlace[i]++
-					}
-				}
+				place := match.GetPlace(player)
+				player.RecentTotalScore += match.Scores[place]
+				player.RecentPlace[place]++
 			}
 		}
 
