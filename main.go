@@ -14,7 +14,7 @@ import (
 var Uma = []int{20 + 20, 10, -10, -20} // オカを含めたウマ。得点から純粋な打点を計算するために使う。
 var Kaeshiten = 30000
 
-const LeastNumMatches = 8 // 「直近n戦」のn
+const LeastNumMatches = 5 // 「直近n戦」のn
 
 const MaxQualifiedPlayers = 8 // 予選通過人数
 
@@ -25,17 +25,21 @@ type PlayerInfo struct {
 	Name    string       // プレイヤー名
 	Matches []*MatchInfo // 対戦情報
 
-	TotalDaten       int        // 打点の合計
-	MaxDaten         int        // 最高打点
-	MaxDatenMatch    *MatchInfo // 最高打点を出した対戦の対戦情報
-	TotalScore       int        // 得点の合計
-	AverageScore     float64    // 得点の平均
-	RecentTotalScore int        // 直近n戦の得点の合計（n戦していない場合は計算されない）
-	Place            []int      // 順位の回数
-	TotalPlace       int        // 順位の合計
-	AveragePlace     float64    // 順位の平均
-	RecentPlace      []int      // 直近n戦の順位の回数
-	LastBeginTime    string     // 最終対戦開始時刻
+	TotalDaten                      int        // 打点の合計
+	MaxDaten                        int        // 最高打点
+	MaxDatenMatch                   *MatchInfo // 最高打点を出した対戦の対戦情報
+	TotalScore                      int        // 得点の合計
+	AverageScore                    float64    // 得点の平均
+	RecentTotalScore                int        // 直近n戦の得点の合計（n戦していない場合は計算されない）
+	ConsecutiveTotalScore           int        // 連続するn戦の得点の合計
+	ConsecutiveTotalScoreFirstMatch *MatchInfo // ↑を出した連続する対戦の最初の対戦の対戦情報
+	Place                           []int      // 順位の回数
+	AccumPlace                      []int      // 順位の累積和 (AccumPlace[2] = Place[0] + Place[1])
+	AccumPlaceRatio                 []float64  // 順位の累積和の割合 (AccumPlaceRatio = AccumPlace / len(Matches))
+	TotalPlace                      int        // 順位の合計
+	AveragePlace                    float64    // 順位の平均
+	RecentPlace                     []int      // 直近n戦の順位の回数
+	LastBeginTime                   string     // 最終対戦開始時刻
 }
 
 var Players = map[string]*PlayerInfo{} // プレイヤー名 -> プレイヤー情報
@@ -115,10 +119,26 @@ func main() {
 				player.RecentTotalScore += match.Scores[place]
 				player.RecentPlace[place]++
 			}
+
+			for first := 0; first <= recentFirstIndex; first++ {
+				sum := 0
+				for _, match := range player.Matches[first : first+LeastNumMatches] {
+					sum += match.Scores[match.GetPlace(player)]
+				}
+				if player.ConsecutiveTotalScore < sum {
+					player.ConsecutiveTotalScore = sum
+					player.ConsecutiveTotalScoreFirstMatch = player.Matches[first]
+				}
+			}
 		}
 
 		player.AverageScore = float64(player.TotalScore) / float64(len(player.Matches))
 		player.AveragePlace = float64(player.TotalPlace) / float64(len(player.Matches))
+		player.AccumPlace[0] = 0
+		for i := 1; i <= 3; i++ {
+			player.AccumPlace[i] = player.AccumPlace[i-1] + player.Place[i-1]
+			player.AccumPlaceRatio[i] = float64(player.AccumPlace[i]) / float64(len(player.Matches))
+		}
 	}
 
 	fmt.Printf(`
@@ -160,7 +180,7 @@ func main() {
 			i+1, playerName, player.MaxDaten, player.MaxDatenMatch.BeginTime)
 	}
 
-	// 直近n戦の平均順位（要n戦）
+	// 4着回避率（要n戦）
 	scoreboard = make([]*PlayerInfo, 0, len(Players))
 	for _, player := range Players {
 		if len(player.Matches) >= LeastNumMatches {
@@ -168,35 +188,41 @@ func main() {
 		}
 	}
 	sort.Slice(scoreboard, func(i, j int) bool {
-		// 順位の平均が小さい（=順位が上の）プレイヤーが上位
-		if scoreboard[i].AveragePlace != scoreboard[j].AveragePlace {
-			return scoreboard[i].AveragePlace < scoreboard[j].AveragePlace
-		}
-		// 同じなら対戦数の多いプレイヤーが上位
-		if len(scoreboard[i].Matches) != len(scoreboard[j].Matches) {
-			return len(scoreboard[i].Matches) > len(scoreboard[j].Matches)
+		for k := 3; k >= 1; k-- {
+			// 1位～k位になった割合が多いプレイヤーが上位
+			if scoreboard[i].AccumPlaceRatio[k] != scoreboard[j].AccumPlaceRatio[k] {
+				return scoreboard[i].AccumPlaceRatio[k] > scoreboard[j].AccumPlaceRatio[k]
+			}
 		}
 		// 同じなら最終対局が早いプレイヤーが上位
 		return scoreboard[i].LastBeginTime < scoreboard[j].LastBeginTime
 	})
 	fmt.Printf(`
-平均順位（要%d戦）
+4着回避率（要%d戦）
 
-| 順位 | プレイヤー名 | 平均順位 | 対戦数 |  1位 |  2位 |  3位 |  4位 |
-| ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 順位 | プレイヤー名 | 4着回避率 | 3,4着回避率 | 2,3,4着回避率 | 最終対戦開始時刻 |
+| ---: | :--- | ---: | ---: | ---: | :---: |
 `, LeastNumMatches)
 	for i, player := range scoreboard {
 		playerName := escapeString(player.Name)
 		if i == 0 {
-			playerName = boldString(playerName)
-			qualifiedPlayers[player] = true
+			if qualifiedPlayers[player] {
+				playerName = italicString(playerName)
+			} else if len(qualifiedPlayers) < MaxQualifiedPlayers {
+				playerName = boldString(playerName)
+				qualifiedPlayers[player] = true
+			}
 		}
-		fmt.Printf("| %d | %s | %.2f | %d | %d | %d | %d | %d |\n",
-			i+1, playerName, player.AveragePlace+1, len(player.Matches),
-			player.Place[0], player.Place[1], player.Place[2], player.Place[3])
+		fmt.Printf("| %d | %s | %.2f | %.2f | %.2f | %s |\n",
+			i+1, playerName,
+			player.AccumPlaceRatio[3],
+			player.AccumPlaceRatio[2],
+			player.AccumPlaceRatio[1],
+			player.LastBeginTime,
+		)
 	}
 
-	// 直近n戦の平均得点（要n戦）
+	// 連続n戦の平均得点（要n戦）
 	scoreboard = make([]*PlayerInfo, 0, len(Players))
 	for _, player := range Players {
 		if len(player.Matches) >= LeastNumMatches {
@@ -204,18 +230,18 @@ func main() {
 		}
 	}
 	sort.Slice(scoreboard, func(i, j int) bool {
-		// 直近n戦の得点の合計が大きいプレイヤーが上位（nで割っておく必要はない）
-		if scoreboard[i].RecentTotalScore != scoreboard[j].RecentTotalScore {
-			return scoreboard[i].RecentTotalScore > scoreboard[j].RecentTotalScore
+		// 連続n戦の得点の合計が大きいプレイヤーが上位
+		if scoreboard[i].ConsecutiveTotalScore != scoreboard[j].ConsecutiveTotalScore {
+			return scoreboard[i].ConsecutiveTotalScore > scoreboard[j].ConsecutiveTotalScore
 		}
 		// 同じなら最終対局が早いプレイヤーが上位
 		return scoreboard[i].LastBeginTime < scoreboard[j].LastBeginTime
 	})
 	fmt.Printf(`
-直近%d戦の平均得点（要%d戦）
+連続%d戦の平均得点（要%d戦）
 
-| 順位 | プレイヤー名 | 総得点 | 平均得点 |  1位 |  2位 |  3位 |  4位 |
-| ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 順位 | プレイヤー名 | 総得点 | 平均得点 | 連続対戦の最初の開始時刻 |
+| ---: | :--- | ---: | ---: | :---: |
 `, LeastNumMatches, LeastNumMatches)
 	for i, player := range scoreboard {
 		playerName := escapeString(player.Name)
@@ -225,9 +251,9 @@ func main() {
 			playerName = boldString(playerName)
 			qualifiedPlayers[player] = true
 		}
-		fmt.Printf("| %d | %s | %.2f | %.2f | %d | %d | %d | %d |\n",
-			i+1, playerName, float64(player.RecentTotalScore)/10.0, float64(player.RecentTotalScore)/10.0/LeastNumMatches,
-			player.RecentPlace[0], player.RecentPlace[1], player.RecentPlace[2], player.RecentPlace[3])
+		fmt.Printf("| %d | %s | %.2f | %.2f | %s |\n",
+			i+1, playerName, float64(player.ConsecutiveTotalScore)/10.0, float64(player.ConsecutiveTotalScore)/10.0/LeastNumMatches,
+			player.ConsecutiveTotalScoreFirstMatch.BeginTime)
 	}
 
 	// 平均得点
@@ -251,6 +277,9 @@ func main() {
 `)
 	for i, player := range scoreboard {
 		playerName := escapeString(player.Name)
+		if qualifiedPlayers[player] {
+			playerName = italicString(playerName)
+		}
 		fmt.Printf("| %d | %s | %.2f | %.2f | %d | %d | %d | %d | %d | %.2f |\n",
 			i+1, playerName, float64(player.TotalScore)/10.0, player.AverageScore/10.0,
 			len(player.Matches),
@@ -275,10 +304,13 @@ func processMatch(fields []string) {
 
 		if Players[playerName] == nil {
 			Players[playerName] = &PlayerInfo{
-				Name:        playerName,
-				MaxDaten:    -0x80000000,
-				Place:       make([]int, 4),
-				RecentPlace: make([]int, 4),
+				Name:                  playerName,
+				MaxDaten:              -0x80000000,
+				ConsecutiveTotalScore: -0x80000000,
+				Place:                 make([]int, 4),
+				AccumPlace:            make([]int, 4),
+				AccumPlaceRatio:       make([]float64, 4),
+				RecentPlace:           make([]int, 4),
 			}
 		}
 
