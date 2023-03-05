@@ -142,11 +142,11 @@ func main() {
 	}
 
 	fmt.Printf(`
-集計対象: 全%d戦
+集計対象: 全%d戦（%s 終了分まで）
 
 - **太字のプレイヤー** は、そのメトリックで予選通過したプレイヤーです。
 - _斜体のプレイヤー_ は、他のメトリックで予選通過したため、そのメトリックでは順位判定から除外されているプレイヤーです。
-`, len(Matches))
+`, len(Matches), Matches[len(Matches)-1].EndTime)
 	qualifiedPlayers := map[*PlayerInfo]bool{}
 
 	var scoreboard []*PlayerInfo
