@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-var Uma = []int{20 + 20, 10, -10, -20} // オカを含めたウマ。得点から純粋な打点を計算するために使う。
+var Uma = []int{30 + 20, 10, -10, -30} // オカを含めたウマ。得点から純粋な打点を計算するために使う。
 var Kaeshiten = 30000
 
 const LeastNumMatches = 5 // 「直近n戦」のn
@@ -33,6 +33,7 @@ type PlayerInfo struct {
 	RecentTotalScore                int        // 直近n戦の得点の合計（n戦していない場合は計算されない）
 	ConsecutiveTotalScore           int        // 連続するn戦の得点の合計
 	ConsecutiveTotalScoreFirstMatch *MatchInfo // ↑を出した連続する対戦の最初の対戦の対戦情報
+	ConsecutiveTotalScoreLastMatch  *MatchInfo // ↑を出した連続する対戦の最後の対戦の対戦情報
 	Place                           []int      // 順位の回数
 	AccumPlace                      []int      // 順位の累積和 (AccumPlace[2] = Place[0] + Place[1])
 	AccumPlaceRatio                 []float64  // 順位の累積和の割合 (AccumPlaceRatio = AccumPlace / len(Matches))
@@ -128,6 +129,7 @@ func main() {
 				if player.ConsecutiveTotalScore < sum {
 					player.ConsecutiveTotalScore = sum
 					player.ConsecutiveTotalScoreFirstMatch = player.Matches[first]
+					player.ConsecutiveTotalScoreLastMatch = player.Matches[first+LeastNumMatches-1]
 				}
 			}
 		}
@@ -180,48 +182,6 @@ func main() {
 			i+1, playerName, player.MaxDaten, player.MaxDatenMatch.BeginTime)
 	}
 
-	// 4着回避率（要n戦）
-	scoreboard = make([]*PlayerInfo, 0, len(Players))
-	for _, player := range Players {
-		if len(player.Matches) >= LeastNumMatches {
-			scoreboard = append(scoreboard, player)
-		}
-	}
-	sort.Slice(scoreboard, func(i, j int) bool {
-		for k := 3; k >= 1; k-- {
-			// 1位～k位になった割合が多いプレイヤーが上位
-			if scoreboard[i].AccumPlaceRatio[k] != scoreboard[j].AccumPlaceRatio[k] {
-				return scoreboard[i].AccumPlaceRatio[k] > scoreboard[j].AccumPlaceRatio[k]
-			}
-		}
-		// 同じなら最終対局が早いプレイヤーが上位
-		return scoreboard[i].LastBeginTime < scoreboard[j].LastBeginTime
-	})
-	fmt.Printf(`
-4着回避率（要%d戦）
-
-| 順位 | プレイヤー名 | 4着回避率 | 3,4着回避率 | 2,3,4着回避率 | 最終対戦開始時刻 |
-| ---: | :--- | ---: | ---: | ---: | :---: |
-`, LeastNumMatches)
-	for i, player := range scoreboard {
-		playerName := escapeString(player.Name)
-		if i == 0 {
-			if qualifiedPlayers[player] {
-				playerName = italicString(playerName)
-			} else if len(qualifiedPlayers) < MaxQualifiedPlayers {
-				playerName = boldString(playerName)
-				qualifiedPlayers[player] = true
-			}
-		}
-		fmt.Printf("| %d | %s | %.2f | %.2f | %.2f | %s |\n",
-			i+1, playerName,
-			player.AccumPlaceRatio[3],
-			player.AccumPlaceRatio[2],
-			player.AccumPlaceRatio[1],
-			player.LastBeginTime,
-		)
-	}
-
 	// 連続n戦の平均得点（要n戦）
 	scoreboard = make([]*PlayerInfo, 0, len(Players))
 	for _, player := range Players {
@@ -240,7 +200,7 @@ func main() {
 	fmt.Printf(`
 連続%d戦の平均得点（要%d戦）
 
-| 順位 | プレイヤー名 | 総得点 | 平均得点 | 連続対戦の最初の開始時刻 |
+| 順位 | プレイヤー名 | 総得点 | 平均得点 | 連続対戦の最後の開始時刻 |
 | ---: | :--- | ---: | ---: | :---: |
 `, LeastNumMatches, LeastNumMatches)
 	for i, player := range scoreboard {
@@ -253,7 +213,7 @@ func main() {
 		}
 		fmt.Printf("| %d | %s | %.2f | %.2f | %s |\n",
 			i+1, playerName, float64(player.ConsecutiveTotalScore)/10.0, float64(player.ConsecutiveTotalScore)/10.0/LeastNumMatches,
-			player.ConsecutiveTotalScoreFirstMatch.BeginTime)
+			player.ConsecutiveTotalScoreLastMatch.BeginTime)
 	}
 
 	// 平均得点
